@@ -32,12 +32,6 @@ Each client has its own customized limit (e.g., Client1 → 200 TPM, Client2 →
 ---
 
 
-IF you want to integare Gemini AI in Azure API Management then refer to step by step video here - 
-
-[![Integrate Gemini AI with API Management](https://img.youtube.com/vi/HNuOF09vq_I/maxresdefault.jpg)](https://youtu.be/HNuOF09vq_I)
-
-
-
 <a href="https://youtu.be/HNuOF09vq_I" target="_blank">
   <img src="https://img.youtube.com/vi/HNuOF09vq_I/maxresdefault.jpg" alt="YouTube Video" />
 </a>

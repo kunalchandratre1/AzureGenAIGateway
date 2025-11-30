@@ -3,8 +3,8 @@ import time
 import requests
 
 # Config
-apim_gateway = "https://kunalgenaigw.azure-api.net"
-model = "gemini-2.0-flash"
+apim_gateway = "https://Your API M.azure-api.net"
+model = "gemini-2.0-flash" #Change the Gemini model name to you
 operation = "generateContent"
 subscription_key = "***Client 1 Subscription goes here***"  # Client1
 

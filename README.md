@@ -1,18 +1,44 @@
-# AzureGenAIGateway
-Gen AI Gateway Custom implementations. Below is the information about all files - 
-1. Rate Limit Gemini
-  **Two Modes – **
-  a. Common limit per client, example 200 TPM per client.
-      Refer file - apim-rate-limit-gemini-default.xml
-      Testing code - TestGeminiRateLimitDefault.py
-  b. Separate limit per client, Client1 – 200TPM, Client2- 500TPM etc.
-      Refer file - rate-limit-gemini-persub.xml
-      Testing code - TestGeminiRateLimitPerSubC1.py
-                     TestGeminiRateLimitPerSubC2.py
+## 🔧 Gen AI Gateway – Custom Implementations
+
+### 1. **Rate Limit for Gemini**
+
+Implements rate-limiting logic with **two modes**:
+
+---
+
+### **🅐 Common Limit Per Client**
+
+All clients share the same rate limit (e.g., **200 TPM per client**).
+
+- **Policy File:**  
+  `apim-rate-limit-gemini-default.xml`
+
+- **Testing Code:**  
+  `TestGeminiRateLimitDefault.py`
+
+---
+
+### **🅑 Separate Limit Per Client**
+
+Each client has its own customized limit (e.g., Client1 → 200 TPM, Client2 → 500 TPM, etc.)
+
+- **Policy File:**  
+  `rate-limit-gemini-persub.xml`
+
+- **Testing Code:**  
+  - `TestGeminiRateLimitPerSubC1.py`  
+  - `TestGeminiRateLimitPerSubC2.py`
+
+---
 
 
 IF you want to integare Gemini AI in Azure API Management then refer to step by step video here - 
 
 [![Integrate Gemini AI with API Management](https://img.youtube.com/vi/HNuOF09vq_I/maxresdefault.jpg)](https://youtu.be/HNuOF09vq_I)
 
+
+
+<a href="https://youtu.be/HNuOF09vq_I" target="_blank">
+  <img src="https://img.youtube.com/vi/HNuOF09vq_I/maxresdefault.jpg" alt="YouTube Video" />
+</a>
 

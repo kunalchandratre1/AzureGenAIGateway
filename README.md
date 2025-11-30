@@ -1,4 +1,4 @@
-## 🔧 Gen AI Gateway – Custom Implementations
+## 🔧Azure Gen AI Gateway – Custom Policy for Gemini AI Rate Limiting
 
 ### 1. **Rate Limit for Gemini**
 

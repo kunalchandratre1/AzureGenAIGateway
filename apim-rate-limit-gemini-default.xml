@@ -1,0 +1,152 @@
+<!-- API Management policy to rate limit Gemini API (OpenAPI-backed, not OpenAI-compatible) -->
+<!-- Uses standard rate-limit-by-key based on header 'X-goog-api-key' -->
+<policies>
+    <inbound>
+        <base />
+        <!-- Token-based rate limiting using Gemini countTokens endpoint -->
+        <set-variable name="tokens-per-minute" value="200" />
+        <set-variable name="tokens-per-hour" value="2000" />
+        <set-variable name="window-seconds" value="60" />
+        <!-- Identify subscription for per-subscriber budgets -->
+        <!-- Fallback to caller IP using context.Request.IpAddress (CallableIp is not a valid property) -->
+        <set-variable name="subscription-key" value="@(context.Subscription?.Id ?? context.Request.Headers.GetValueOrDefault("Ocp-Apim-Subscription-Key") ?? context.Request.IpAddress)" />
+        <!-- Extract model from request path; default to gemini-2.0-flash -->
+        <set-variable name="model-name" value="@{
+        var path = context.Request.OriginalUrl.Path;
+        var idx = path.IndexOf("/v1beta/models/");
+        if (idx >= 0)
+        {
+            var s = path.Substring(idx + "/v1beta/models/".Length);
+            var colon = s.IndexOf(":");
+            return colon > 0 ? s.Substring(0, colon) : s;
+        }
+        return "gemini-2.0-flash";
+    }" />
+        <!-- Build countTokens URL using APIM named value for Gemini API key -->
+        <!-- Ensure you have a named value called 'X-goog-api-key' in APIM -->
+        <set-variable name="count-tokens-url" value="@{
+      var model = context.Variables.GetValueOrDefault<string>("model-name");
+      var baseUrl = $"https://generativelanguage.googleapis.com/v1beta/models/{model}:countTokens";
+      // APIM named value substitution happens at runtime for {{X-goog-api-key}}
+      return baseUrl + "?key={{X-goog-api-key}}";
+    }" />
+        <!-- Body passthrough to countTokens -->
+        <set-variable name="request-body" value="@(context.Request.Body.As<string>(preserveContent: true))" />
+        <send-request mode="new" response-variable-name="countTokensResponse" timeout="10" ignore-error="true">
+            <set-url>@(context.Variables.GetValueOrDefault<string>("count-tokens-url"))</set-url>
+            <set-method>POST</set-method>
+            <set-header name="Content-Type" exists-action="override">
+                <value>application/json</value>
+            </set-header>
+            <!-- No client header needed; using APIM named value for auth -->
+            <set-body>@(context.Variables.GetValueOrDefault<string>("request-body"))</set-body>
+        </send-request>
+        <!-- Restore original request body to ensure backend receives it -->
+        <set-body>@(context.Variables.GetValueOrDefault<string>("request-body"))</set-body>
+        <!-- Parse token count -->
+        <set-variable name="request-token-count" value="@{
+        try
+        {
+            var resp = context.Variables["countTokensResponse"] as IResponse;
+            if (resp != null && resp.StatusCode == 200)
+            {
+                var body = resp.Body.As<JObject>();
+                var tc = (int?)body?["totalTokens"] ?? (int?)body?["tokenCount"];
+                return (tc ?? 0).ToString();
+            }
+        }
+        catch {}
+        return "0";
+    }" />
+        <!-- TEMP: expose token count for debugging; remove in production -->
+        <set-header name="x-request-token-count" exists-action="override">
+            <value>@(context.Variables.GetValueOrDefault<string>("request-token-count"))</value>
+        </set-header>
+        <!-- Cache-based rolling counters -->
+        <set-variable name="minute-cache-key" value="@($"tokens:{context.Variables.GetValueOrDefault<string>("subscription-key")}:m")" />
+        <set-variable name="hour-cache-key" value="@($"tokens:{context.Variables.GetValueOrDefault<string>("subscription-key")}:h")" />
+        <cache-lookup-value key="@(context.Variables.GetValueOrDefault<string>("minute-cache-key"))" variable-name="minute-used" />
+        <cache-lookup-value key="@(context.Variables.GetValueOrDefault<string>("hour-cache-key"))" variable-name="hour-used" />
+        <set-variable name="minute-used" value="@(string.IsNullOrEmpty(context.Variables.GetValueOrDefault<string>("minute-used")) ? "0" : context.Variables.GetValueOrDefault<string>("minute-used"))" />
+        <set-variable name="hour-used" value="@(string.IsNullOrEmpty(context.Variables.GetValueOrDefault<string>("hour-used")) ? "0" : context.Variables.GetValueOrDefault<string>("hour-used"))" />
+        <set-variable name="minute-total" value="@((int.Parse(context.Variables.GetValueOrDefault<string>("minute-used")) + int.Parse(context.Variables.GetValueOrDefault<string>("request-token-count"))).ToString())" />
+        <set-variable name="hour-total" value="@((int.Parse(context.Variables.GetValueOrDefault<string>("hour-used")) + int.Parse(context.Variables.GetValueOrDefault<string>("request-token-count"))).ToString())" />
+        <!-- TEMP: also expose rolling totals to verify accumulation in the minute/hour windows -->
+        <set-header name="x-minute-total" exists-action="override">
+            <value>@(context.Variables.GetValueOrDefault<string>("minute-total"))</value>
+        </set-header>
+        <set-header name="x-hour-total" exists-action="override">
+            <value>@(context.Variables.GetValueOrDefault<string>("hour-total"))</value>
+        </set-header>
+        <choose>
+            <when condition="@(int.Parse(context.Variables.GetValueOrDefault<string>("minute-total")) > int.Parse(context.Variables.GetValueOrDefault<string>("tokens-per-minute")))">
+                <return-response>
+                    <set-status code="429" reason="Too Many Requests" />
+                    <set-header name="Content-Type" exists-action="override">
+                        <value>application/json</value>
+                    </set-header>
+                    <set-body>@{
+              return Newtonsoft.Json.JsonConvert.SerializeObject(new {
+                error = new {
+                  code = 429,
+                  message = "Token rate limit exceeded (per minute).",
+                  status = "RESOURCE_EXHAUSTED"
+                }
+              });
+          }</set-body>
+                </return-response>
+            </when>
+            <when condition="@(int.Parse(context.Variables.GetValueOrDefault<string>("hour-total")) > int.Parse(context.Variables.GetValueOrDefault<string>("tokens-per-hour")))">
+                <return-response>
+                    <set-status code="429" reason="Too Many Requests" />
+                    <set-header name="Content-Type" exists-action="override">
+                        <value>application/json</value>
+                    </set-header>
+                    <set-body>@{
+              return Newtonsoft.Json.JsonConvert.SerializeObject(new {
+                error = new {
+                  code = 429,
+                  message = "Token rate limit exceeded (per hour).",
+                  status = "RESOURCE_EXHAUSTED"
+                }
+              });
+          }</set-body>
+                </return-response>
+            </when>
+        </choose>
+        <!-- Persist counters -->
+        <cache-store-value key="@(context.Variables.GetValueOrDefault<string>("minute-cache-key"))" value="@(context.Variables.GetValueOrDefault<string>("minute-total"))" duration="@(int.Parse(context.Variables.GetValueOrDefault<string>("window-seconds")))" />
+        <cache-store-value key="@(context.Variables.GetValueOrDefault<string>("hour-cache-key"))" value="@(context.Variables.GetValueOrDefault<string>("hour-total"))" duration="3600" />
+        <!-- Ensure backend generateContent calls are authenticated via named value -->
+        <set-query-parameter name="key" exists-action="override">
+            <value>{{X-goog-api-key}}</value>
+        </set-query-parameter>
+        <!-- Continue to backend -->
+    </inbound>
+    <backend>
+        <base />
+    </backend>
+    <outbound>
+        <base />
+    </outbound>
+    <on-error>
+        <base />
+        <!-- Optional friendly error body for rate limit violations -->
+        <choose>
+            <when condition="@(context.Response.StatusCode == 429)">
+                <set-body>@{
+            return Newtonsoft.Json.JsonConvert.SerializeObject(new {
+              error = new {
+                code = 429,
+                message = "Rate limit exceeded. Please retry after the renewal period.",
+                status = "RESOURCE_EXHAUSTED"
+              }
+            });
+        }</set-body>
+                <set-header name="Content-Type" exists-action="override">
+                    <value>application/json</value>
+                </set-header>
+            </when>
+        </choose>
+    </on-error>
+</policies>
